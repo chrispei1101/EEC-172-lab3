@@ -94,9 +94,13 @@ volatile int reset_int = 0;
 volatile int repeat = 0;
 char input[17] = "";
 int bitlen = 0;
-char code[10];
+
+char newChar = '0';
 char input_str[50] = ""; // Initialize input string
 int expired = 0;
+
+int pressCount = 0; // Track the number of presses on the current button
+char* currentButton = "0"; // Track the current button being pressed
 
 //volatile uint64_t interval = 0;
 int interval = 0;
@@ -176,7 +180,8 @@ void display(void)
 {
 
     char* D_input = decodeInput(input);
-    strcpy(code, D_input);
+
+
     if (strcmp(D_input,"NULL") == 0) { // invalid button pressed
         Report("received %s, not valid\n\r", input);
     }
@@ -184,10 +189,9 @@ void display(void)
         Report("Pressed %s\n\r", D_input);
     }
 
-        int pressCount = -1; // Track the number of presses on the current button
-        char currentButton = '0'; // Track the current button being pressed
 
-        SysTickReset();
+
+        TimerEnable(TIMERA2_BASE, TIMER_A);
 
 
              if(D_input == "MUTE") {
@@ -196,7 +200,7 @@ void display(void)
                  input_str[len + 1] = '\0';
                  Report("Sending: %s\n", input_str);
                  TimerEnable(TIMERA1_BASE, TIMER_A);
-                 break;
+                 //break;
              }
 
              else if(D_input == "LAST") {
@@ -209,31 +213,22 @@ void display(void)
 
              else {
 
-                 // read the countdown register and compute elapsed cycles
-                 uint64_t delta = SYSTICK_RELOAD_VAL - SysTickValueGet();
-
-                 // convert elapsed cycles to microseconds
-                 timer = TICKS_TO_US(delta);
-                 if (timer > 2000000){
-                     expired = 1;
-                 }
+                 newChar = getCharFromButton(D_input, pressCount);
+                 Report("Current: %c  ",newChar);
 
                  // Process button presses
-                 if(!strcmp(D_input,currentButton)) {
+                 if(!strcmp(D_input,currentButton) && newChar != '\0') {
                      // New button pressed, reset press count
                      currentButton = D_input;
-                     pressCount = 0;
+                     pressCount = 1;
                  }
-                 char newChar = getCharFromButton(D_input, pressCount);
-                 if(newChar != '\0') {
-                     // Append new character to the input string
-                     if (expired = 1){
-                         strcat(input_str, newChar);
-                     }
+                 else {
+                   pressCount++;
+                 }
 
-                     pressCount++;
-                 }
+
              }
+
 
 
 
@@ -277,18 +272,7 @@ static void GPIOA0IntHandler(void) {
 
     // convert elapsed cycles to microseconds
     interval = TICKS_TO_US(delta);
-/*
-    if (interval <= 25000 && interval >=20000){
-        repeat = 1;
-    }
 
-    if (interval > 25000){
-      repeat = 0;
-    }
-
-
-    if (repeat == 0){}
-    */
 
         if (reset_int == 1){
 
@@ -361,7 +345,6 @@ static void printLetter()
 {
     TimerIntClear(TIMERA1_BASE, TIMER_A);
     TimerDisable(TIMERA1_BASE, TIMER_A);
-    //char* D_input = decodeInput(input);
     fillScreen(BLACK);
    setTextColor(WHITE, BLACK);
    setTextSize(1);
@@ -370,6 +353,18 @@ static void printLetter()
    setTextColor(GREEN, BLACK);
    setTextSize(2);
    Outstr(input_str);
+   memset(input_str, 0, sizeof(input_str));
+}
+
+static void Timer2IntHandler(void) {
+    TimerIntClear(TIMERA2_BASE, TIMER_A);
+    TimerDisable(TIMERA2_BASE, TIMER_A);
+    expired = 1;
+    int len = strlen(input_str);
+    pressCount = 0;
+    input_str[len] = newChar;
+    input_str[len + 1] = '\0'; // Null-terminate the string
+    expired = 0;
 }
 
 
@@ -430,6 +425,11 @@ int main() {
      Timer_IF_IntSetup(TIMERA1_BASE, TIMER_A, printLetter);
      TimerLoadSet(TIMERA1_BASE, TIMER_A, MILLISECONDS_TO_TICKS(1000));
 
+     Timer_IF_Init(PRCM_TIMERA2, TIMERA2_BASE, TIMER_CFG_PERIODIC, TIMER_A, 0);
+     Timer_IF_IntSetup(TIMERA2_BASE, TIMER_A, Timer2IntHandler);
+     TimerLoadSet(TIMERA2_BASE, TIMER_A, MILLISECONDS_TO_TICKS(2000)); // 2 seconds
+
+
 
     MAP_GPIOIntRegister(GPIOA0_BASE, GPIOA0IntHandler);
 
@@ -457,7 +457,6 @@ int main() {
             MAP_GPIOIntDisable(GPIOA0_BASE, 0x1);
             UtilsDelay(4000000);
             MAP_GPIOIntEnable(GPIOA0_BASE, 0x1);
-
 
 
         }
