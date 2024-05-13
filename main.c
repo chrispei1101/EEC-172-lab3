@@ -36,6 +36,7 @@
 #include "timer_if.h"
 #include "timer.h"
 #include "gpio.h"
+#include "gpio_if.h"
 
 
 // Common interface includes
@@ -60,6 +61,7 @@
 #define NINE "1010100010010000"
 #define LAST "1010100000110000"
 #define MUTE "0010100001001000"
+
 
 
 
@@ -89,20 +91,26 @@
 // track systick counter periods elapsed
 // if it is not 0, we know the transmission ended
 volatile int systick_cnt = 0;
-long ulStatus;
+
 volatile int reset_int = 0;
-volatile int repeat = 0;
 char input[17] = "";
 int bitlen = 0;
+int send_ready = 0;
+int receive_ready = 0;
+
+
 
 char newChar = '0';
 char input_str[50] = ""; // Initialize input string
-int expired = 0;
+
+// Uart Communication
+char uart_buffer[50] = "";
+volatile int uart_ind = 0;
+
 
 int pressCount = 0; // Track the number of presses on the current button
 char* currentButton = "0"; // Track the current button being pressed
 
-//volatile uint64_t interval = 0;
 int interval = 0;
 
 extern void (* const g_pfnVectors[])(void);
@@ -151,6 +159,31 @@ char* decodeInput(char* input) {
     }
 }
 
+static void printLetterDown(char* str)
+{
+    int cursor_x = 0;
+
+    while (*str != '\0') {
+        drawChar(cursor_x, WIDTH*3/4, *str, 0xFFFF, 0xFFFF, 2);
+        str++;
+        cursor_x += 11;
+    }
+
+
+}
+
+static void printLetterUp(char* str)
+{
+
+    int cursor_x = 0;
+
+    while (*str != '\0') {
+        drawChar(cursor_x, WIDTH*1/8, *str, 0xFFFF, 0xFFFF, 2);
+        str++;
+        cursor_x += 11;
+    }
+
+}
 
 
 // Function to get the character corresponding to the button press
@@ -190,44 +223,42 @@ void display(void)
     }
 
 
+         if(D_input == "MUTE") {
+             // Send the constructed string
+             int len = strlen(input_str);
+             input_str[len + 1] = '\0';
+             send_ready = 1;
 
-        TimerEnable(TIMERA2_BASE, TIMER_A);
+         }
 
+         else if(D_input == "LAST") {
+             // Delete the previous character
+             if(strlen(input_str) > 0) {
+                 Report("Deleted: last character\n");
+                 input_str[strlen(input_str) - 1] = '\0';
+                 newChar = '\0';
 
-             if(D_input == "MUTE") {
-                 // Send the constructed string
-                 int len = strlen(input_str);
-                 input_str[len + 1] = '\0';
-                 Report("Sending: %s\n", input_str);
-                 TimerEnable(TIMERA1_BASE, TIMER_A);
-                 //break;
              }
+         }
 
-             else if(D_input == "LAST") {
-                 // Delete the previous character
-                 if(strlen(input_str) > 0) {
-                     input[strlen(input_str) - 1] = '\0';
-                     printf("Deleted: %s\n", D_input);
-                 }
+         else if (D_input != "NULL"){
+             TimerEnable(TIMERA2_BASE, TIMER_A); // begin count for time out for input str
+
+             newChar = getCharFromButton(D_input, pressCount);
+             Report("Current: %c\n\r",newChar);
+
+             // Process button presses
+             if(!strcmp(D_input,currentButton) && newChar != '\0') {
+                 // New button pressed, reset press count
+                 currentButton = D_input;
+                 pressCount = 1;
              }
-
              else {
-
-                 newChar = getCharFromButton(D_input, pressCount);
-                 Report("Current: %c  ",newChar);
-
-                 // Process button presses
-                 if(!strcmp(D_input,currentButton) && newChar != '\0') {
-                     // New button pressed, reset press count
-                     currentButton = D_input;
-                     pressCount = 1;
-                 }
-                 else {
-                   pressCount++;
-                 }
-
-
+               pressCount++;
              }
+
+
+         }
 
 
 
@@ -341,31 +372,41 @@ static void SysTickInit(void) {
     MAP_SysTickEnable();
 }
 
-static void printLetter()
-{
-    TimerIntClear(TIMERA1_BASE, TIMER_A);
-    TimerDisable(TIMERA1_BASE, TIMER_A);
-    fillScreen(BLACK);
-   setTextColor(WHITE, BLACK);
-   setTextSize(1);
-   fillScreen(BLACK);
-   setCursor(0, 0); // cursor is outside the screen from previous test
-   setTextColor(GREEN, BLACK);
-   setTextSize(2);
-   Outstr(input_str);
-   memset(input_str, 0, sizeof(input_str));
-}
+
 
 static void Timer2IntHandler(void) {
     TimerIntClear(TIMERA2_BASE, TIMER_A);
     TimerDisable(TIMERA2_BASE, TIMER_A);
-    expired = 1;
     int len = strlen(input_str);
     pressCount = 0;
     input_str[len] = newChar;
     input_str[len + 1] = '\0'; // Null-terminate the string
-    expired = 0;
 }
+
+
+static void UART1IntHandler(void) {
+
+    unsigned long ulStatus_u;
+    ulStatus_u = MAP_UARTIntStatus(UARTA1_BASE, true);
+    MAP_UARTIntClear(UARTA1_BASE, PRCM_UARTA1);
+    if (ulStatus_u & UART_INT_RX) {
+        int uart_ind = 0;
+        while (UARTCharsAvail(UARTA1_BASE)) {
+            uart_buffer[uart_ind] = UARTCharGetNonBlocking(UARTA1_BASE);
+            //uart_buffer[uart_ind] = UARTCharGet(UARTA1_BASE);
+            uart_ind++;
+        }
+        int len = strlen(uart_buffer);
+        uart_buffer[len + 1] = '\0'; // Null-terminate the string
+        Report("Received %s\n", uart_buffer);
+    }
+
+
+    receive_ready = 1;
+
+
+}
+
 
 
 //****************************************************************************
@@ -420,10 +461,43 @@ int main() {
      Adafruit_Init();
      fillScreen(BLACK);
 
+     //prcmperipheral reset
 
+     // UART
+
+
+
+     MAP_PRCMPeripheralReset(PRCM_UARTA1);
+
+
+     MAP_UARTConfigSetExpClk(UARTA1_BASE, PRCMPeripheralClockGet(PRCM_UARTA1),
+                             UART_BAUD_RATE, (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE |
+                             UART_CONFIG_PAR_NONE));
+
+
+     MAP_UARTIntRegister(UARTA1_BASE, UART1IntHandler);
+
+     UARTFIFOLevelSet(UARTA1_BASE, UART_FIFO_TX1_8, UART_FIFO_RX1_8);
+
+     unsigned long ulStatus_u;
+     ulStatus_u = MAP_GPIOIntStatus(UARTA1_BASE, false);
+     MAP_GPIOIntClear(UARTA1_BASE, ulStatus_u);
+
+     MAP_UARTIntEnable(UARTA1_BASE, PRCM_UARTA1);
+
+
+
+     MAP_UARTEnable(UARTA1_BASE);
+
+
+
+
+
+/*
      Timer_IF_Init(PRCM_TIMERA1, TIMERA1_BASE, TIMER_CFG_PERIODIC, TIMER_A, 0);
      Timer_IF_IntSetup(TIMERA1_BASE, TIMER_A, printLetter);
-     TimerLoadSet(TIMERA1_BASE, TIMER_A, MILLISECONDS_TO_TICKS(1000));
+     TimerLoadSet(TIMERA1_BASE, TIMER_A, MILLISECONDS_TO_TICKS(100));
+     */
 
      Timer_IF_Init(PRCM_TIMERA2, TIMERA2_BASE, TIMER_CFG_PERIODIC, TIMER_A, 0);
      Timer_IF_IntSetup(TIMERA2_BASE, TIMER_A, Timer2IntHandler);
@@ -447,9 +521,8 @@ int main() {
     SysTickReset();
     while (1) {
 
-       //Report("%d ", repeat);
+        if (bitlen == 16){
 
-        if (bitlen == 16){ // end of signal
             display();
             bitlen = 0;
             reset_int = 0;
@@ -460,6 +533,33 @@ int main() {
 
 
         }
+
+        if (send_ready == 1){
+            Report("Sending: %s\n", input_str);
+            int i = 0;
+            //print char for test
+            fillScreen(BLACK);
+            printLetterUp(input_str);
+
+
+            while(input_str[i] != '\0'){
+                UARTCharPutNonBlocking(UARTA1_BASE, input_str[i]);
+                //UARTCharPut(UARTA1_BASE, input_str[i]);
+                i++;
+            }
+            memset(input_str, 0, sizeof(input_str));
+            send_ready = 0;
+        }
+
+
+            if (receive_ready == 1){
+            //print str
+            fillScreen(BLACK);
+             printLetterDown(uart_buffer);
+             memset(uart_buffer, 0, sizeof(uart_buffer));
+            receive_ready = 0;
+        }
+
 
     }
 

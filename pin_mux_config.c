@@ -57,6 +57,8 @@ void PinMuxConfig(void)
     //
     // Set unused pins to PIN_MODE_0 with the exception of JTAG pins 16,17,19,20
     //
+    PinModeSet(PIN_01, PIN_MODE_0);
+    PinModeSet(PIN_02, PIN_MODE_0);
     PinModeSet(PIN_03, PIN_MODE_0);
     PinModeSet(PIN_04, PIN_MODE_0);
     PinModeSet(PIN_08, PIN_MODE_0);
@@ -65,8 +67,6 @@ void PinMuxConfig(void)
     PinModeSet(PIN_45, PIN_MODE_0);
     PinModeSet(PIN_52, PIN_MODE_0);
     PinModeSet(PIN_53, PIN_MODE_0);
-    PinModeSet(PIN_58, PIN_MODE_0);
-    PinModeSet(PIN_59, PIN_MODE_0);
     PinModeSet(PIN_60, PIN_MODE_0);
     PinModeSet(PIN_63, PIN_MODE_0);
     PinModeSet(PIN_64, PIN_MODE_0);
@@ -76,9 +76,9 @@ void PinMuxConfig(void)
     //
     PRCMPeripheralClkEnable(PRCM_GPIOA0, PRCM_RUN_MODE_CLK);
     PRCMPeripheralClkEnable(PRCM_GPIOA3, PRCM_RUN_MODE_CLK);
-    PRCMPeripheralClkEnable(PRCM_I2CA0, PRCM_RUN_MODE_CLK);
     PRCMPeripheralClkEnable(PRCM_GSPI, PRCM_RUN_MODE_CLK);
     PRCMPeripheralClkEnable(PRCM_UARTA0, PRCM_RUN_MODE_CLK);
+    PRCMPeripheralClkEnable(PRCM_UARTA1, PRCM_RUN_MODE_CLK);
 
     //
     // Configure PIN_61 for GPIO Output
@@ -129,4 +129,15 @@ void PinMuxConfig(void)
     // Configure PIN_57 for UART0 UART0_RX
     //
     PinTypeUART(PIN_57, PIN_MODE_3);
+
+    //
+    // Configure PIN_01 for UART1 UART1_TX
+    //
+    PinTypeUART(PIN_01, PIN_MODE_7);
+
+    //
+    // Configure PIN_02 for UART1 UART1_RX
+    //
+    PinTypeUART(PIN_02, PIN_MODE_7);
 }
+
